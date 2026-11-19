@@ -19,6 +19,7 @@
       --c1: #4c8dff; --c2: #b392f0; --c3: #6e7b8a; --c4: #e3b341; color-scheme: dark; }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 var(--font); }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 24px max(16px, env(safe-area-inset-left)) 48px; display: flex; flex-direction: column; gap: 24px; }
   h1 { font-size: 26px; margin: 0; letter-spacing: .02em; }
@@ -132,7 +133,7 @@
   <section class="panel" id="stock" hidden>
     <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
       <h2 id="stock-title">個股</h2>
-      <button type="button" id="stock-close" class="btn">關閉</button>
+      <button type="button" id="stock-close" class="btn" aria-label="關閉個股面板，回到排名表">✕ 關閉個股面板</button>
     </div>
     <p class="muted" id="stock-sub"></p>
     <div class="cards" id="stock-ranks"></div>
@@ -239,7 +240,10 @@
     const hit = V().ranking.find((r) => r.code === q) || V().ranking.find((r) => (r.name || '').includes(q));
     openStock(hit ? hit.code : q);
   });
-  $('stock-close').addEventListener('click', () => { $('stock').hidden = true; });
+  $('stock-close').addEventListener('click', () => {
+    $('stock').hidden = true;
+    $('rank').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+  });
 
   const HCOLORS = ['var(--c3)', 'var(--c2)', 'var(--c4)', 'var(--c1)', 'var(--up)'];
   async function openStock(code) {
