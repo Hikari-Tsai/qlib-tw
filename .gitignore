@@ -1,0 +1,14 @@
+# 本機完整資料與實驗輸出（太大，不進 repo；GitHub Actions 只用 state/ 的近期資料）
+.venv/
+data/
+qlib_data/
+outputs/
+mlruns/
+work/
+__pycache__/
+*.pyc
+*.log
+
+# 網頁資料每天由 GitHub Actions 產生後直接部署到 Pages，不進 repo
+site/data.js
+site/api/

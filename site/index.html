@@ -1,0 +1,510 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台股多週期排名</title>
+<style>
+  /* 版面：上方控制列 → 績效（數字、走勢、矩陣）→ 今日排名表；色票偏冷的藍綠，紅綠依台股慣例（紅漲綠跌） */
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --fg: #17202a; --muted: #5d6b7a; --line: #dfe4ea;
+    --accent: #1f6feb; --accent-soft: #e3edfd; --up: #d1242f; --down: #1a7f37; --up-soft: #fde8e8; --down-soft: #e3f4e8;
+    --c1: #1f6feb; --c2: #8250df; --c3: #9aa5b1; --c4: #bf8700;
+    --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    --mono: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f141a; --panel: #161c24; --fg: #e6edf3; --muted: #8b98a7; --line: #2a3340;
+      --accent: #4c8dff; --accent-soft: #1b2a44; --up: #ff6b6b; --down: #3fb950; --up-soft: #3a1d20; --down-soft: #15301f;
+      --c1: #4c8dff; --c2: #b392f0; --c3: #6e7b8a; --c4: #e3b341; color-scheme: dark; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.6 var(--font); }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 24px max(16px, env(safe-area-inset-left)) 48px; display: flex; flex-direction: column; gap: 24px; }
+  h1 { font-size: 26px; margin: 0; letter-spacing: .02em; }
+  h2 { font-size: 18px; margin: 0; }
+  p { margin: 0; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .disclaimer { border: 1px solid var(--up); background: var(--up-soft); border-radius: 8px; padding: 10px 14px; font-size: 14px; }
+  .warn { border-left: 3px solid var(--c4); background: var(--accent-soft); padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+  .notice { background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; font-size: 13px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  .controls { display: flex; flex-direction: row; flex-wrap: wrap; gap: 14px 24px; align-items: center; }
+  .ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .ctl > span { font-size: 13px; color: var(--muted); }
+  .seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; background: transparent; color: var(--fg); padding: 6px 12px; font: inherit; font-size: 14px; cursor: pointer; white-space: nowrap; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+  .seg button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; }
+  .card .k { font-size: 12px; color: var(--muted); }
+  .card .v { font-size: 22px; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+  .card .s { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .up { color: var(--up); } .down { color: var(--down); }
+  .chart { position: relative; width: 100%; min-height: 300px; }
+  .chart svg { display: block; width: 100%; overflow: visible; }
+  .chart text { fill: var(--muted); font-size: 11px; font-family: var(--font); }
+  .tip { position: absolute; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,.12); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 13px; color: var(--muted); }
+  .legend i { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  td.l, th.l { text-align: left; }
+  th.sel, td.sel { background: var(--accent-soft); }
+  tr.top td:first-child { box-shadow: inset 3px 0 var(--up); }
+  tr.low td:first-child { box-shadow: inset 3px 0 var(--down); }
+  .rank-box { max-height: 560px; overflow: auto; }
+  input[type="search"] { font: inherit; padding: 6px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--fg); min-width: 0; width: 200px; }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
+  details summary { cursor: pointer; font-weight: 600; }
+  details ul { margin: 8px 0 0; padding-left: 1.2em; color: var(--muted); font-size: 13px; line-height: 1.8; }
+  .matrix td.cell { font-family: var(--mono); }
+  h3 { font-size: 15px; margin: 0; }
+  .chart.small { min-height: 220px; }
+  .btn { font: inherit; font-size: 14px; padding: 6px 14px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: var(--fg); cursor: pointer; }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  #rank tbody tr { cursor: pointer; }
+  #rank tbody tr:hover td { background: var(--accent-soft); }
+  a { color: var(--accent); }
+  .flow { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .flow li { counter-increment: step; display: grid; grid-template-columns: 2em 6.5em 1fr; gap: 4px 10px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .flow li::before { content: counter(step); color: var(--accent); font-family: var(--mono); font-weight: 600; }
+  .flow li span { color: var(--fg); font-size: 14px; line-height: 1.7; min-width: 0; }
+  @media (max-width: 560px) { .flow li { grid-template-columns: 2em 1fr; } .flow li span { grid-column: 2; } }
+  code { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header style="display:flex;flex-direction:column;gap:8px">
+    <h1>台股多週期排名</h1>
+    <p class="muted">資料日期 <b id="asof">—</b>　股票池 <b id="pool">—</b>　產生時間 <span id="gen">—</span></p>
+    <p class="muted">模型開發過程與各輪實驗結果：<a href="https://claude.ai/artifact/13TqjHnTJyRSKf91X9x5Am" target="_blank" rel="noopener">台股 Qlib 選股實驗</a></p>
+    <p class="disclaimer" role="note"><b>免責聲明：</b>本頁內容僅供科學實驗與研究用途，不構成任何投資建議或買賣推薦。所有排名與績效皆為模型輸出與歷史回測，不保證未來結果；依本頁資訊進行任何交易所產生的盈虧，作者概不負責。投資前請自行判斷並承擔風險。</p>
+    <p class="notice">績效<b>未計手續費、證交稅與融券成本</b>，也不考慮漲跌停無法成交；實際交易結果會較差。每個模型版本的樣本外起點不同：v1 是 2021-11-05、v2 是 2026-11-06，之前的成績不能當作真實表現。</p>
+  </header>
+
+  <section class="panel controls" aria-label="選項">
+    <div class="ctl"><span>模型版本</span><div class="seg" id="ctl-v"></div></div>
+    <div class="ctl"><span>預測週期</span><div class="seg" id="ctl-h"></div></div>
+    <div class="ctl"><span>N</span><div class="seg" id="ctl-n"></div></div>
+    <div class="ctl"><span>策略</span><div class="seg" id="ctl-s">
+      <button data-v="long">做多 TopN</button><button data-v="ls">多空 TopN−LowN</button><button data-v="short">做空 LowN</button>
+    </div></div>
+    <div class="ctl"><span>期間</span><div class="seg" id="ctl-p"></div></div>
+    <p class="muted" id="ver-note" style="flex-basis:100%"></p>
+  </section>
+
+  <section class="panel" id="perf">
+    <h2 id="perf-title">績效</h2>
+    <p class="warn" id="perf-warn" hidden></p>
+    <div class="cards" id="cards"></div>
+    <div class="legend" id="legend"></div>
+    <div class="chart" id="chart"></div>
+    <p class="muted" id="perf-note"></p>
+  </section>
+
+  <section class="panel">
+    <h2 id="matrix-title">各週期 × N 比較</h2>
+    <p class="muted" id="matrix-note"></p>
+    <div class="scroll"><table class="matrix" id="matrix"></table></div>
+  </section>
+
+  <section class="panel">
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+      <h2 id="rank-title">今日排名</h2>
+      <input type="search" id="q" placeholder="搜尋代號或名稱" aria-label="搜尋代號或名稱">
+    </div>
+    <div class="controls" style="padding:0">
+      <div class="ctl"><span>排序週期</span><div class="seg" id="ctl-rh"></div></div>
+      <div class="ctl"><span>比較基準</span><div class="seg" id="ctl-cmp">
+        <button data-v="dh">上個週期</button><button data-v="d1">前一交易日</button>
+      </div></div>
+    </div>
+    <p class="muted" id="rank-note">左側紅條是前 N 名，綠條是後 N 名。▲ 名次上升、▼ 名次下降，「新」是當時不在股票池。分數只代表同一天股票池內的相對順序，數值本身沒有單位。</p>
+    <div class="rank-box"><table id="rank"></table></div>
+  </section>
+
+  <section class="panel" id="stock" hidden>
+    <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center">
+      <h2 id="stock-title">個股</h2>
+      <button type="button" id="stock-close" class="btn">關閉</button>
+    </div>
+    <p class="muted" id="stock-sub"></p>
+    <div class="cards" id="stock-ranks"></div>
+    <div class="two">
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+        <h3>各週期名次（近 120 個交易日）</h3>
+        <div class="legend" id="stock-rank-legend"></div>
+        <div class="chart small" id="stock-rank-chart"></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+        <h3>收盤價（未還原，近 250 個交易日）</h3>
+        <div class="chart small" id="stock-price-chart"></div>
+      </div>
+    </div>
+    <h3>近 10 個交易日籌碼</h3>
+    <div class="scroll"><table id="stock-flows"></table></div>
+    <p class="muted">資料 API：<code id="stock-api"></code></p>
+  </section>
+
+  <details class="panel">
+    <summary>資料 API</summary>
+    <ul>
+      <li><code>api/index.json</code>：資料日期、模型資訊、可查詢的股票清單（近 120 個交易日曾在股票池）。</li>
+      <li><code>api/latest.json</code>：最新一天完整排名，依模型版本分組（<code>versions.v1</code>、<code>versions.v2</code>），每檔含開盤、收盤與各週期 <code>rank</code>、<code>score</code>。</li>
+      <li><code>api/stocks/{代號}.json</code>：個股各版本的最新名次（<code>latest.v2.H20</code>）與近 120 天各週期名次（<code>rankHistory.v2.H20</code>）、近 250 天開盤與收盤價、三大法人買賣超（股）、融資融券餘額（張）。</li>
+      <li>網址相對於本頁，例如部署在 GitHub Pages 時是 <code>https://&lt;帳號&gt;.github.io/&lt;repo&gt;/api/stocks/2330.json</code>，每天更新一次，唯讀。</li>
+    </ul>
+  </details>
+
+  <details class="panel">
+    <summary>計算方式</summary>
+    <ul>
+      <li>每個交易日收盤後，用各週期模型替股票池（每月依前 60 日平均成交金額取前 100 名的上市普通股）打分數排名。</li>
+      <li>第 d 天的名單在第 d+1 天收盤等權買進，持有 H 個交易日；每天建立一份新名單，組合每天平均分給仍在持有期內的 H 份名單。</li>
+      <li>多空：做多 TopN、放空 LowN，報酬 = TopN 報酬 − LowN 報酬，不計融券成本與限制。</li>
+      <li>做空 LowN：放空分數最低的 N 檔（融券），LowN 下跌時獲利，報酬 = −LowN 報酬（每日計算），不計融券費用與券源限制。</li>
+      <li>股票池等權：前一天股票池的所有成員，每日等權。加權指數不含息，股票報酬已還原除權息（含股利）。</li>
+      <li>0050（元大台灣50）：以證交所參考價計算的含息日報酬（已處理 2025 年 1 拆 4 分割），作為買進持有大型股 ETF 的參考（市價已反映管理費，未計買賣手續費與稅）。</li>
+      <li>年化超額：相對股票池等權的日超額報酬平均 × 252（多空策略則相對 0）。月勝率：該月報酬勝過對照組的月份比例。</li>
+      <li>模型版本：v1 以 2008–2016（部分 2012–2016）訓練、2017–2018 驗證；v2 以到 2026-11-05 的資料訓練。兩版排名每天都會記錄，可用上方「模型版本」切換。</li>
+      <li>成本估計：每天換掉 1/H 的部位，每次來回約 0.585%（買 0.1425%、賣 0.1425% 加證交稅 0.3%），年化拖累約 252 ÷ H × 0.585%；多空兩邊都交易所以加倍，未含融券費用。這是不考慮名單重疊的上限估計。</li>
+    </ul>
+  </details>
+</div>
+
+<div class="wrap" style="padding-top:0">
+  <section class="panel" id="method">
+    <h2>模型方法與框架</h2>
+    <ol class="flow">
+      <li><b>資料</b><span>臺灣證券交易所公開資料：上市普通股每日行情（2005 年起）、三大法人買賣超（2012-05 起）、融資融券餘額，依除權息、減資、面額變更還原股價；含已下市股票，避免倖存者偏差。</span></li>
+      <li><b>股票池</b><span>每月最後一個交易日，取過去 60 個交易日平均成交金額前 100 名（tw100），下個月生效。</span></li>
+      <li><b>特徵</b><span>微軟開源量化平台 <a href="https://github.com/microsoft/qlib" target="_blank" rel="noopener">Qlib</a> 的 Alpha158：由開高低收與成交量計算的 158 個價量因子（報酬、波動、均線、量價相關等）；部分週期另加 18 個法人與融資融券特徵。</span></li>
+      <li><b>預測目標</b><span>「明天收盤買進、持有 H 個交易日」的報酬，在當天股票池中的排名（每日橫截面排名標準化）。模型只學相對強弱，不預測大盤漲跌。</span></li>
+      <li><b>模型</b><span>LightGBM 梯度提升樹，每個週期（1／5／10／20／60 日）各一個獨立模型，分兩個版本：<b>v1 研究版</b>訓練 2008–2016、驗證 2017–2018、測試 2019-01 ～ 2021-11，2021-11-05 之後完全沒用於訓練或挑選，是長期樣本外紀錄；<b>v2 正式版</b>用到 2026-11-05 的全部資料訓練，學到較新的市場型態，但 2026-11-06 之前的成績是看過答案的結果。各段交界留 H+1 天避免標籤重疊。</span></li>
+      <li><b>評估</b><span>Rank IC：每天模型排名與實際報酬排名的相關係數取平均（0 為隨機、1 為完美）。測試期 20 日模型約 0.05，屬於微弱訊號。</span></li>
+      <li><b>每日流程</b><span>GitHub Actions 每個交易日晚上自動抓取當天資料、以固定的模型計算排名，排名只新增不改寫，再重新計算歷史績效並發佈本頁。模型不每日重訓，避免結果被事後調整；換新版本時舊版本繼續並行記錄，舊紀錄不改寫。</span></li>
+    </ol>
+    <p class="muted">已知限制：績效未計交易成本與漲跌停；樣本外期間大多為多頭市場；排名對單一股票的雜訊很大。完整實驗紀錄見頁首連結。</p>
+  </section>
+</div>
+
+<script>
+  // 避免瀏覽器沿用舊的 data.js（每天更新，但檔名不變）
+  document.write('<script src="data.js?t=' + Date.now() + '"><\/script>');
+</script>
+<script>
+(() => {
+  const D = window.QDATA;
+  if (!D) { document.getElementById('perf-title').textContent = '找不到 data.js，請先執行 build_site.py'; return; }
+  const $ = (id) => document.getElementById(id);
+  const fmtP = (x, d = 1) => x == null || !isFinite(x) ? '—' : (x >= 0 ? '+' : '') + (x * 100).toFixed(d) + '%';
+  const fmtN = (x, d = 2) => x == null || !isFinite(x) ? '—' : x.toFixed(d);
+  const cls = (x) => x > 0 ? 'up' : x < 0 ? 'down' : '';
+  const store = (() => { try { return JSON.parse(localStorage.getItem('qtw') || '{}'); } catch { return {}; } })();
+  const vIds = D.versions.map((v) => v.id);
+  const st0v = vIds.includes(store.v) ? store.v : D.defaultVersion;
+  const V = () => D.byVersion[st.v];
+  const VM = () => D.versions.find((v) => v.id === st.v);
+  const H0 = D.byVersion[st0v].horizons;
+  const defH = H0.includes(20) ? 20 : H0[0];
+  const st = { v: st0v, h: store.h ?? defH, n: store.n ?? 10, s: store.s === 'low' ? 'short' : (store.s ?? 'long'), p: store.p ?? 'holdout', rh: store.rh ?? store.h ?? defH, cmp: store.cmp ?? 'dh', q: '' };
+  const save = () => { try { localStorage.setItem('qtw', JSON.stringify({ v: st.v, h: st.h, n: st.n, s: st.s, p: st.p, rh: st.rh, cmp: st.cmp })); } catch {} };
+
+  $('asof').textContent = D.asOf; $('pool').textContent = D.pool; $('gen').textContent = D.generated;
+  const segFill = (id, vals, label) => { $(id).replaceChildren(...vals.map((v) => { const b = document.createElement('button'); b.dataset.v = v; b.textContent = label(v); return b; })); };
+  segFill('ctl-v', vIds, (v) => D.versions.find((x) => x.id === v).label);
+  segFill('ctl-h', H0, (h) => `${h} 日`);
+  segFill('ctl-n', D.ns, (n) => String(n));
+  segFill('ctl-rh', H0, (h) => `${h} 日`);
+  const PERIODS = [['m1', '近 1 月'], ['m3', '近 3 月'], ['m6', '近 6 月'], ['ytd', '今年以來'], ['y1', '近 1 年'], ['y3', '近 3 年'], ['holdout', '樣本外 2021-11 起'], ['all', '全部 2019 起']];
+  const periodLabel = (p) => p === 'holdout' ? `樣本外 ${VM().oosStart.slice(0, 7)} 起` : (PERIODS.find(([k]) => k === p) || [, p])[1];
+  segFill('ctl-p', PERIODS.map(([k]) => k), periodLabel);
+  if (!PERIODS.some(([k]) => k === st.p)) st.p = 'holdout';
+  const bindSeg = (id, key, num) => $(id).addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    st[key] = num ? +b.dataset.v : b.dataset.v; save(); render();
+  });
+  bindSeg('ctl-h', 'h', true); bindSeg('ctl-n', 'n', true); bindSeg('ctl-s', 's'); bindSeg('ctl-p', 'p');
+  bindSeg('ctl-rh', 'rh', true); bindSeg('ctl-cmp', 'cmp'); bindSeg('ctl-v', 'v');
+  $('q').addEventListener('input', (e) => { st.q = e.target.value.trim(); renderRank(); });
+  $('q').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const q = e.target.value.trim(); if (!q) return;
+    const hit = V().ranking.find((r) => r.code === q) || V().ranking.find((r) => (r.name || '').includes(q));
+    openStock(hit ? hit.code : q);
+  });
+  $('stock-close').addEventListener('click', () => { $('stock').hidden = true; });
+
+  const HCOLORS = ['var(--c3)', 'var(--c2)', 'var(--c4)', 'var(--c1)', 'var(--up)'];
+  async function openStock(code) {
+    const box = $('stock'); box.hidden = false;
+    $('stock-title').textContent = `${code} 載入中…`; $('stock-sub').textContent = '';
+    for (const id of ['stock-ranks', 'stock-rank-legend', 'stock-rank-chart', 'stock-price-chart', 'stock-flows']) $(id).replaceChildren();
+    $('stock-api').textContent = `api/stocks/${code}.json`;
+    box.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    let d;
+    try {
+      const res = await fetch(`api/stocks/${encodeURIComponent(code)}.json?v=${D.asOf}`, { cache: 'no-cache' });
+      if (!res.ok) throw new Error(res.status === 404 ? '找不到這檔股票（只有近 120 個交易日曾在股票池的股票）' : `HTTP ${res.status}`);
+      d = await res.json();
+    } catch (err) {
+      $('stock-title').textContent = `${code}`;
+      $('stock-sub').textContent = location.protocol === 'file:' ? '直接開啟檔案時瀏覽器不允許讀取 API，請用網頁伺服器或 GitHub Pages 開啟。' : `無法載入：${err.message}`;
+      return;
+    }
+    $('stock-title').textContent = `${d.code} ${d.name}`;
+    $('stock-sub').textContent = d.inPool ? `資料日期 ${d.asOf}，目前在股票池 ${d.pool}（共 ${d.poolSize} 檔）。` : `資料日期 ${d.asOf}，目前不在股票池 ${d.pool}，沒有最新排名。`;
+    const dl = d.latest?.[st.v];
+    if (dl) $('stock-ranks').replaceChildren(...V().horizons.map((h) => {
+      const x = dl['H' + h]; const ref = (V().rankRef || {})[h]?.dh?.ranks?.[d.code];
+      const dlt = ref != null ? ref - x.rank : null;
+      return card(`${h} 日名次`, `${x.rank} / ${d.poolSize}`, ref == null ? '上個週期：不在股票池' : `上個週期 ${ref}（${dlt > 0 ? '▲' + dlt : dlt < 0 ? '▼' + -dlt : '持平'}）`, x.rank <= st.n ? 'up' : x.rank > d.poolSize - st.n ? 'down' : '');
+    }));
+    const rh = d.rankHistory;
+    const rlines = V().horizons.map((h, i) => ({ name: `${h} 日`, v: (rh[st.v] || {})['H' + h] || [], color: HCOLORS[i % HCOLORS.length], w: h === st.rh ? 2.4 : 1.3 }));
+    $('stock-rank-legend').replaceChildren(...rlines.map((l) => { const s = document.createElement('span'); const i = document.createElement('i'); i.style.background = l.color; s.append(i, document.createTextNode(l.name)); return s; }));
+    plotLines($('stock-rank-chart'), rh.dates, rlines, { lo: 1, hi: d.poolSize || 100, invert: true, fmt: (v) => String(Math.round(v)), label: '名次' });
+    plotLines($('stock-price-chart'), d.daily.dates, [{ name: '收盤價', v: d.daily.close, color: 'var(--c1)', w: 1.8 }], { fmt: (v) => v.toLocaleString('zh-TW', { maximumFractionDigits: 2 }), label: '收盤價' });
+    const n = d.daily.dates.length, from = Math.max(0, n - 10);
+    const head = document.createElement('tr');
+    head.append(...['日期', '開盤價', '收盤價', '外資（張）', '投信（張）', '自營商（張）', '融資餘額（張）', '融券餘額（張）'].map((t, i) => { const th = document.createElement('th'); th.textContent = t; if (!i) th.className = 'l'; return th; }));
+    const lots = (x) => x == null ? '—' : Math.round(x / 1000).toLocaleString('zh-TW');
+    const rows = [];
+    for (let i = n - 1; i >= from; i--) {
+      const tr = document.createElement('tr');
+      const o = d.daily.open?.[i], c = d.daily.close[i];
+      const vals = [[d.daily.dates[i], 'l'], [o ?? '—', ''], [c ?? '—', c > o ? 'up' : c < o ? 'down' : ''],
+        ...['foreign_net', 'trust_net', 'dealer_net'].map((k) => [lots(d.daily[k][i]), cls(d.daily[k][i])]),
+        [d.daily.margin_lots[i] == null ? '—' : d.daily.margin_lots[i].toLocaleString('zh-TW'), ''],
+        [d.daily.short_lots[i] == null ? '—' : d.daily.short_lots[i].toLocaleString('zh-TW'), '']];
+      tr.append(...vals.map(([t, c]) => { const td = document.createElement('td'); td.textContent = t; td.className = c; return td; }));
+      rows.push(tr);
+    }
+    const th_ = document.createElement('thead'); th_.append(head); const tb = document.createElement('tbody'); tb.append(...rows);
+    $('stock-flows').replaceChildren(th_, tb);
+  }
+
+  function plotLines(el, dates, lines, opt) {
+    el.replaceChildren();
+    const W = el.clientWidth || 500, H = 220, m = { t: 10, r: 12, b: 24, l: 48 };
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('height', H);
+    svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', opt.label);
+    const vals = lines.flatMap((l) => l.v.filter((x) => x != null));
+    if (!vals.length) { const p = document.createElement('p'); p.className = 'muted'; p.textContent = '沒有資料'; el.append(p); return; }
+    let lo = opt.lo ?? Math.min(...vals), hi = opt.hi ?? Math.max(...vals);
+    if (opt.lo == null) { const pad = (hi - lo) * 0.05 || 1; lo -= pad; hi += pad; }
+    const x = (i) => m.l + (W - m.l - m.r) * i / Math.max(1, dates.length - 1);
+    const y = (v) => opt.invert ? m.t + (H - m.t - m.b) * (v - lo) / (hi - lo || 1) : H - m.b - (H - m.t - m.b) * (v - lo) / (hi - lo || 1);
+    const add = (tag, attrs, text) => { const e = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; svg.append(e); return e; };
+    const ticks = opt.invert ? [lo, Math.round((lo + hi) / 4), Math.round((lo + hi) / 2), Math.round((lo + hi) * 3 / 4), hi] : [0, 0.25, 0.5, 0.75, 1].map((k) => lo + (hi - lo) * k);
+    for (const v of ticks) { add('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: 'var(--line)' }); add('text', { x: m.l - 6, y: y(v), 'text-anchor': 'end', 'dominant-baseline': 'middle' }, opt.fmt(v)); }
+    for (const k of [0, 0.5, 1]) { const i = Math.round((dates.length - 1) * k); add('text', { x: x(i), y: H - 6, 'text-anchor': k === 0 ? 'start' : k === 1 ? 'end' : 'middle' }, dates[i]); }
+    for (const l of lines) {
+      let d = '', pen = false;
+      l.v.forEach((v, i) => { if (v == null) { pen = false; return; } d += (pen ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(v).toFixed(1); pen = true; });
+      add('path', { d, fill: 'none', stroke: l.color, 'stroke-width': l.w, 'stroke-linejoin': 'round' });
+    }
+    const rule = add('line', { y1: m.t, y2: H - m.b, stroke: 'var(--muted)', visibility: 'hidden' });
+    el.append(svg);
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; el.append(tip);
+    const hit = add('rect', { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent' });
+    hit.addEventListener('pointermove', (ev) => {
+      const box = svg.getBoundingClientRect(); const px = (ev.clientX - box.left) * W / box.width;
+      const i = Math.max(0, Math.min(dates.length - 1, Math.round((px - m.l) / (W - m.l - m.r) * (dates.length - 1))));
+      rule.setAttribute('x1', x(i)); rule.setAttribute('x2', x(i)); rule.setAttribute('visibility', 'visible');
+      tip.replaceChildren(); const hd = document.createElement('div'); hd.textContent = dates[i]; tip.append(hd);
+      for (const l of lines) { const r = document.createElement('div'); r.textContent = `${l.name} ${l.v[i] == null ? '—' : opt.fmt(l.v[i])}`; r.style.color = l.color; tip.append(r); }
+      tip.hidden = false; tip.style.left = Math.min((ev.clientX - box.left) + 14, el.clientWidth - tip.offsetWidth) + 'px'; tip.style.top = '8px';
+    });
+    hit.addEventListener('pointerleave', () => { tip.hidden = true; rule.setAttribute('visibility', 'hidden'); });
+  }
+
+  function periodStart(p) {
+    if (p === 'all') return null;
+    if (p === 'holdout') return VM().oosStart;
+    const t = new Date(D.asOf + 'T00:00:00Z');
+    if (p === 'ytd') return `${t.getUTCFullYear()}-01-01`;
+    const months = { m1: 1, m3: 3, m6: 6, y1: 12, y3: 36 }[p];
+    t.setUTCMonth(t.getUTCMonth() - months);
+    return t.toISOString().slice(0, 10);
+  }
+  // 從期間起點的下一個交易日開始累計（起點當天的報酬不算），全部則從第 2 天起
+  const startIdx = () => { const s = periodStart(st.p); if (!s) return 1; const i = D.dates.findIndex((d) => d > s); return Math.max(1, i < 0 ? D.dates.length - 1 : i); };
+  const slice = (key) => ((key in D.common) ? D.common[key] : V().daily[key]).slice(startIdx());
+  function stats(r, bench) {
+    const v = r.map((x) => x ?? 0); const n = v.length; if (n < 2) return {};
+    let g = 1, peak = 1, mdd = 0; for (const x of v) { g *= 1 + x; peak = Math.max(peak, g); mdd = Math.min(mdd, g / peak - 1); }
+    const cum = g - 1, ann = Math.pow(g, 252 / n) - 1;
+    const mean = v.reduce((a, b) => a + b, 0) / n, sd = Math.sqrt(v.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1));
+    const vol = sd * Math.sqrt(252);
+    let ex = null, win = null;
+    if (bench) {
+      const b = bench.map((x) => x ?? 0); ex = v.reduce((a, x, i) => a + x - b[i], 0) / n * 252;
+      const dates = D.dates.slice(startIdx()); const m = new Map();
+      v.forEach((x, i) => { const k = dates[i].slice(0, 7); const o = m.get(k) || [1, 1]; o[0] *= 1 + x; o[1] *= 1 + b[i]; m.set(k, o); });
+      const arr = [...m.values()]; win = arr.filter(([a, c]) => a > c).length / arr.length;
+    }
+    return { cum, ann, vol, sharpe: vol > 0 ? ann / vol : null, mdd, ex, win };
+  }
+  const key = (h, n, s) => `H${h}_N${n}_${s}`;
+  const COST_RT = 0.001425 + 0.004425; // 買進手續費 + 賣出手續費與證交稅（未含融券費用）
+  const stratName = (s, n) => s === 'long' ? `做多 Top${n}` : s === 'ls' ? `多空 Top${n}−Low${n}` : `做空 Low${n}`;
+  // 做空 LowN：用 LowN 組合的日報酬取負號
+  const stratSlice = (h, n, s) => s === 'short' ? slice(key(h, n, 'low')).map((x) => x == null ? null : -x) : slice(key(h, n, s));
+
+  function renderControls() {
+    const hb = $('ctl-p').querySelector('[data-v="holdout"]'); if (hb) hb.textContent = periodLabel('holdout');
+    $('ver-note').textContent = VM().description || '';
+    for (const [id, k] of [['ctl-h', 'h'], ['ctl-n', 'n'], ['ctl-s', 's'], ['ctl-p', 'p'], ['ctl-rh', 'rh'], ['ctl-cmp', 'cmp'], ['ctl-v', 'v']])
+      for (const b of $(id).querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.v == st[k]));
+  }
+
+  function card(k, v, s, c) {
+    const d = document.createElement('div'); d.className = 'card';
+    const a = document.createElement('span'); a.className = 'k'; a.textContent = k;
+    const b = document.createElement('span'); b.className = 'v ' + (c || ''); b.textContent = v;
+    const e = document.createElement('span'); e.className = 's'; e.textContent = s || '';
+    d.append(a, b, e); return d;
+  }
+
+  function renderPerf() {
+    const r = stratSlice(st.h, st.n, st.s), pool = slice('pool'), twii = slice('twii');
+    const etf = D.common.etf0050 && D.common.etf0050.some((x) => x != null) ? slice('etf0050') : null;
+    const isLS = st.s !== 'long';  // 多空、做空都以 0 為比較基準
+    const s = stats(r, isLS ? null : pool), sp = stats(pool), sw = stats(twii), se = etf ? stats(etf) : {};
+    const period = `${D.dates[startIdx()]} ～ ${D.asOf}（${periodLabel(st.p)}）`;
+    $('perf-title').textContent = `${st.h} 日模型・${stratName(st.s, st.n)}（${st.v}）`;
+    const inSample = D.dates[startIdx()] < VM().oosStart;
+    $('perf-warn').hidden = !inSample;
+    $('perf-warn').textContent = inSample ? `注意：${VM().oosStart} 之前的資料 ${st.v} 模型已經看過（用於訓練或挑選），這段成績偏樂觀，不能當作真實表現。只有 ${VM().oosStart} 之後才是樣本外。` : '';
+    $('cards').replaceChildren(
+      card('累積報酬', fmtP(s.cum), st.s === 'ls' ? '多空價差的累積' : st.s === 'short' ? 'LowN 下跌時為正' : `股票池等權 ${fmtP(sp.cum)}・0050 ${fmtP(se.cum)}・加權指數 ${fmtP(sw.cum)}`, cls(s.cum)),
+      card('年化報酬', fmtP(s.ann), `年化波動 ${fmtP(s.vol).replace('+', '')}`, cls(s.ann)),
+      card(isLS ? '夏普比（不含無風險利率）' : '年化超額（對股票池等權）', isLS ? fmtN(s.sharpe) : fmtP(s.ex), isLS ? '' : `月勝率 ${s.win == null ? '—' : Math.round(s.win * 100) + '%'}`, isLS ? cls(s.sharpe) : cls(s.ex)),
+      card('最大回撤', fmtP(s.mdd), `股票池等權 ${fmtP(sp.mdd)}`, 'down'),
+      card('若計成本（估計）', fmtP(-COST_RT * 252 / st.h * (st.s === 'ls' ? 2 : 1)) + '/年', `每天換掉 1/${st.h} 的部位，來回成本 ${(COST_RT * 100).toFixed(3)}%`, 'down'),
+    );
+    const etfLine = etf ? [{ name: '0050（含息，參考）', r: etf, color: 'var(--c2)', w: 1.6 }] : [];
+    const lines = isLS ? [{ name: stratName(st.s, st.n), r, color: 'var(--c1)', w: 2.4 }, ...etfLine] : [
+      { name: stratName(st.s, st.n), r, color: 'var(--c1)', w: 2.4 },
+      { name: '股票池等權', r: pool, color: 'var(--c4)', w: 1.6 },
+      ...etfLine,
+      { name: '加權指數（不含息）', r: twii, color: 'var(--c3)', w: 1.6 },
+    ];
+    $('legend').replaceChildren(...lines.map((l) => { const sp_ = document.createElement('span'); const i = document.createElement('i'); i.style.background = l.color; sp_.append(i, document.createTextNode(l.name)); return sp_; }));
+    drawChart($('chart'), D.dates.slice(startIdx()), lines);
+    $('perf-note').textContent = `期間 ${period}。${V().evalName} Rank IC ${V().evalRankIC[st.h] ?? '—'}，特徵 ${V().featureSets[st.h] === 'flow' ? '價量＋法人籌碼' : '價量'}。未計交易成本。`;
+  }
+
+  function drawChart(el, dates, lines) {
+    el.replaceChildren();
+    const W = el.clientWidth || 800, H = 300, m = { t: 10, r: 64, b: 26, l: 52 };
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('height', H);
+    svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', '累積報酬走勢');
+    const series = lines.map((l) => { let g = 1; return l.r.map((x) => (g *= 1 + (x ?? 0)) - 1); });
+    let lo = Math.min(0, ...series.flat()), hi = Math.max(0, ...series.flat());
+    const step = niceStep((hi - lo) / 5); lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+    const x = (i) => m.l + (W - m.l - m.r) * i / Math.max(1, dates.length - 1);
+    const y = (v) => H - m.b - (H - m.t - m.b) * (v - lo) / (hi - lo || 1);
+    const add = (tag, attrs, text) => { const e = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; svg.append(e); return e; };
+    for (let v = lo; v <= hi + 1e-9; v += step) {
+      add('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: 'var(--line)', 'stroke-width': Math.abs(v) < 1e-9 ? 1.5 : 1 });
+      add('text', { x: m.l - 6, y: y(v), 'text-anchor': 'end', 'dominant-baseline': 'middle' }, fmtP(v, 0));
+    }
+    const nTicks = W < 520 ? 3 : 6;
+    for (let k = 0; k <= nTicks; k++) { const i = Math.round((dates.length - 1) * k / nTicks); add('text', { x: x(i), y: H - 6, 'text-anchor': k === 0 ? 'start' : k === nTicks ? 'end' : 'middle' }, dates[i].slice(0, 7)); }
+    const hs = dates.findIndex((d) => d >= VM().oosStart);
+    if (hs > 0) { add('line', { x1: x(hs), x2: x(hs), y1: m.t, y2: H - m.b, stroke: 'var(--muted)', 'stroke-dasharray': '4 4' }); add('text', { x: x(hs) + 4, y: m.t + 10 }, '樣本外 →'); }
+    const ends = [];
+    lines.forEach((l, j) => {
+      const s = series[j]; const step_ = Math.max(1, Math.floor(s.length / (W * 1.5)));
+      let d = ''; for (let i = 0; i < s.length; i += step_) d += (d ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(s[i]).toFixed(1);
+      d += 'L' + x(s.length - 1).toFixed(1) + ',' + y(s[s.length - 1]).toFixed(1);
+      add('path', { d, fill: 'none', stroke: l.color, 'stroke-width': l.w, 'stroke-linejoin': 'round' });
+      ends.push({ y: y(s[s.length - 1]), v: s[s.length - 1], color: l.color });
+    });
+    ends.sort((a, b) => a.y - b.y); for (let i = 1; i < ends.length; i++) ends[i].y = Math.max(ends[i].y, ends[i - 1].y + 13);
+    for (const e of ends) { const t = add('text', { x: W - m.r + 6, y: e.y, 'dominant-baseline': 'middle' }, fmtP(e.v)); t.style.fill = e.color; }
+    const rule = add('line', { y1: m.t, y2: H - m.b, stroke: 'var(--muted)', visibility: 'hidden' });
+    el.append(svg);
+    const tip = document.createElement('div'); tip.className = 'tip'; tip.hidden = true; el.append(tip);
+    const hit = add('rect', { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent' });
+    hit.addEventListener('pointermove', (ev) => {
+      const box = svg.getBoundingClientRect(); const px = (ev.clientX - box.left) * W / box.width;
+      const i = Math.max(0, Math.min(dates.length - 1, Math.round((px - m.l) / (W - m.l - m.r) * (dates.length - 1))));
+      rule.setAttribute('x1', x(i)); rule.setAttribute('x2', x(i)); rule.setAttribute('visibility', 'visible');
+      tip.replaceChildren(); const h = document.createElement('div'); h.textContent = dates[i]; tip.append(h);
+      lines.forEach((l, j) => { const d = document.createElement('div'); d.textContent = `${l.name} ${fmtP(series[j][i])}`; d.style.color = l.color; tip.append(d); });
+      tip.hidden = false; const tx = (ev.clientX - box.left) + 14; tip.style.left = Math.min(tx, el.clientWidth - tip.offsetWidth) + 'px'; tip.style.top = '8px';
+    });
+    hit.addEventListener('pointerleave', () => { tip.hidden = true; rule.setAttribute('visibility', 'hidden'); });
+  }
+  function niceStep(raw) { const p = Math.pow(10, Math.floor(Math.log10(raw || 1))); const f = raw / p; return (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * p; }
+
+  function renderMatrix() {
+    const isLS = st.s !== 'long';  // 多空、做空都以 0 為比較基準
+    const pool = slice('pool');
+    $('matrix-title').textContent = `各週期 × N：${st.s === 'long' ? '做多 TopN' : st.s === 'ls' ? '多空 TopN−LowN' : '做空 LowN'}`;
+    $('matrix-note').textContent = (st.s === 'ls' ? '數字是多空價差的年化報酬' : st.s === 'short' ? '數字是做空的年化報酬（LowN 下跌為正）' : '數字是相對股票池等權的年化超額報酬') + `（${periodLabel(st.p)}，未計成本）。點一格切換到該組合。`;
+    const head = document.createElement('tr');
+    head.append(...['週期', ...D.ns.map((n) => `N = ${n}`)].map((t, i) => { const th = document.createElement('th'); th.textContent = t; if (!i) th.className = 'l'; return th; }));
+    const rows = V().horizons.map((h) => {
+      const tr = document.createElement('tr'); const td0 = document.createElement('td'); td0.className = 'l'; td0.textContent = `${h} 日`; tr.append(td0);
+      for (const n of D.ns) {
+        const s = stats(stratSlice(h, n, st.s), isLS ? null : pool); const v = isLS ? s.ann : s.ex;
+        const td = document.createElement('td'); td.className = 'cell ' + cls(v) + (h === st.h && n === st.n ? ' sel' : ''); td.textContent = fmtP(v);
+        td.style.cursor = 'pointer'; td.addEventListener('click', () => { st.h = h; st.n = n; save(); render(); });
+        tr.append(td);
+      }
+      return tr;
+    });
+    const thead = document.createElement('thead'); thead.append(head); const tbody = document.createElement('tbody'); tbody.append(...rows);
+    $('matrix').replaceChildren(thead, tbody);
+  }
+
+  function renderRank() {
+    const h0 = st.rh;
+    const ref = (V().rankRef || {})[h0]?.[st.cmp];
+    const refLabel = st.cmp === 'dh' ? `上個週期（${h0} 個交易日前，${ref?.date ?? '—'}）` : `前一交易日（${ref?.date ?? '—'}）`;
+    $('rank-title').textContent = `${D.asOf} 排名（依 ${h0} 日週期）`;
+    $('rank-note').textContent = `比較基準：${refLabel}。左側紅條是前 N 名、綠條是後 N 名（N 跟上方選項一致）。▲ 名次上升、▼ 名次下降，「新」是當時不在股票池。分數只代表同一天股票池內的相對順序，數值本身沒有單位。`;
+    const total = V().ranking.length;
+    const rows = [...V().ranking].sort((a, b) => a['r' + h0] - b['r' + h0]);
+    const head = document.createElement('tr');
+    const cols = [['名次', ''], ['變化', ''], ['代號', 'l'], ['名稱', 'l'], ['開盤', ''], ['收盤', ''], ['前次名次', ''], ...V().horizons.map((h) => [`${h} 日名次`, h === h0 ? 'sel' : '']), [`${h0} 日分數`, '']];
+    head.append(...cols.map(([t, c]) => { const th = document.createElement('th'); th.textContent = t; th.className = c; return th; }));
+    const q = st.q.toLowerCase();
+    const body = rows.filter((r) => !q || r.code.includes(q) || (r.name || '').toLowerCase().includes(q)).map((r) => {
+      const tr = document.createElement('tr'); const rk = r['r' + h0];
+      if (rk <= st.n) tr.className = 'top'; else if (rk > total - st.n) tr.className = 'low';
+      const prev = ref?.ranks?.[r.code];
+      let chg = '—', chgCls = 'muted';
+      if (ref && prev == null) { chg = '新'; chgCls = ''; }
+      else if (prev != null && prev !== rk) { const dlt = prev - rk; chg = (dlt > 0 ? '▲' : '▼') + Math.abs(dlt); chgCls = dlt > 0 ? 'up' : 'down'; }
+      const px = (v) => v == null ? '—' : v.toLocaleString('zh-TW', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cells = [[rk, ''], [chg, chgCls], [r.code, 'l'], [r.name, 'l'], [px(r.open), ''], [px(r.close), r.close > r.open ? 'up' : r.close < r.open ? 'down' : ''], [prev ?? '—', 'muted'], ...V().horizons.map((h) => [r['r' + h], h === h0 ? 'sel' : '']), [fmtN(r['s' + h0], 4), '']];
+      tr.append(...cells.map(([t, c]) => { const td = document.createElement('td'); td.textContent = t; td.className = c; return td; }));
+      tr.tabIndex = 0; tr.title = '查看個股';
+      tr.addEventListener('click', () => openStock(r.code));
+      tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') openStock(r.code); });
+      return tr;
+    });
+    const thead = document.createElement('thead'); thead.append(head); const tbody = document.createElement('tbody'); tbody.append(...body);
+    $('rank').replaceChildren(thead, tbody);
+  }
+
+  function render() { renderControls(); renderPerf(); renderMatrix(); renderRank(); }
+  render();
+  let t; window.addEventListener('resize', () => { clearTimeout(t); t = setTimeout(renderPerf, 150); });
+})();
+</script>
+</body>
+</html>
