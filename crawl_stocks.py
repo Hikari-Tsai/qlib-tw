@@ -75,9 +75,12 @@ class Fetcher:
 
 def save_json(path: Path, obj: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    # mtime=0、不寫檔名：內容相同時檔案位元完全相同，git 不會把沒變的事件表當成新版本
+    data = gzip.compress(json.dumps(obj, ensure_ascii=False).encode("utf-8"), mtime=0)
+    if path.exists() and path.read_bytes() == data:
+        return
     tmp = path.with_suffix(path.suffix + ".tmp")
-    with gzip.open(tmp, "wt", encoding="utf-8") as f:
-        json.dump(obj, f, ensure_ascii=False)
+    tmp.write_bytes(data)
     tmp.replace(path)
 
 
