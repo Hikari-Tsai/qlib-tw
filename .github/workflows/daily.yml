@@ -7,6 +7,9 @@ on:
     - cron: "30 13 * * 1-5"  # 台灣時間 21:30（UTC+8）
     - cron: "30 15 * * 1-5"  # 台灣時間 23:30，資料晚公布時補抓
   workflow_dispatch:
+  push:  # 網頁或產生網頁的程式有改動時，推上來就重新部署
+    branches: [main]
+    paths: ["site/index.html", "build_site.py"]
 
 permissions:
   contents: write

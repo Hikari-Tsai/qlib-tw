@@ -474,7 +474,7 @@
     const h0 = st.rh;
     const ref = (V().rankRef || {})[h0]?.[st.cmp];
     const refLabel = st.cmp === 'dh' ? `上個週期（${h0} 個交易日前，${ref?.date ?? '—'}）` : `前一交易日（${ref?.date ?? '—'}）`;
-    $('rank-title').textContent = `${D.asOf} 排名（依 ${h0} 日週期）`;
+    $('rank-title').textContent = `Qlib-LightGBM模型推薦排序 (${D.asOf} 更新)`;
     $('rank-note').textContent = `比較基準：${refLabel}。左側紅條是前 N 名、綠條是後 N 名（N 跟上方選項一致）。▲ 名次上升、▼ 名次下降，「新」是當時不在股票池。分數只代表同一天股票池內的相對順序，數值本身沒有單位。`;
     const total = V().ranking.length;
     const rows = [...V().ranking].sort((a, b) => a['r' + h0] - b['r' + h0]);
